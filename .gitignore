@@ -1,0 +1,36 @@
+# Gradle files
+.gradle/
+build/
+*/build/
+
+# Android Studio files
+.idea/
+*.iml
+*.iws
+
+# Sensitive information
+local.properties
+*.jks
+*.keystore
+
+# Build artifacts
+Release/
+*.apk
+*.aar
+
+# System files
+.DS_Store
+Thumbs.db
+
+# User-specific files
+.p12
+.key
+.pem
+
+# Logs
+*.log
+
+# Optional: Ignore backup folders that might exist
+Capture/
+temp/
+tmp/

@@ -1,0 +1,82 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.innocomm.uvcdemo'
+    compileSdkVersion rootProject.ext.versionCompiler
+
+    def localProperties = new Properties()
+    def localPropertiesFile = rootProject.file('local.properties')
+    if (localPropertiesFile.exists()) {
+        localProperties.load(new FileInputStream(localPropertiesFile))
+    }
+
+    defaultConfig {
+        applicationId "com.innocomm.uvcdemo"
+        minSdkVersion rootProject.ext.versionMin
+        targetSdkVersion rootProject.ext.versionTarget
+        versionCode 1
+        versionName "1.0.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+
+        create("uvcandroid") {
+            storeFile = file("../uvcandroid.jks")
+            storePassword = localProperties.getProperty('signing.storePassword')
+            keyAlias = localProperties.getProperty('signing.keyAlias')
+            keyPassword = localProperties.getProperty('signing.keyPassword')
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
+    buildTypes {
+        debug {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig = signingConfigs.getByName("uvcandroid")
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig = signingConfigs.getByName("uvcandroid")
+        }
+        applicationVariants.all { variant ->
+            variant.outputs.each { output ->
+                def newName = output.outputFile.name
+                newName = newName.replace("app-", "MultiUVC_${variant.versionName}_")
+                output.outputFileName = newName
+            }
+        }
+    }
+    compileOptions {
+        sourceCompatibility rootProject.ext.javaSourceCompatibility
+        targetCompatibility rootProject.ext.javaTargetCompatibility
+    }
+}
+
+dependencies {
+
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'com.google.android.material:material:1.10.0'
+
+    implementation 'com.github.getActivity:XXPermissions:13.5'
+//    implementation 'com.github.warkiz.widget:indicatorseekbar:2.1.2'
+    implementation 'com.github.warkiz:IndicatorSeekBar:v2.1.1'
+
+    // debugImplementation because LeakCanary should only run in debug builds.
+//    debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.8.1'
+
+    implementation 'com.herohan:UVCAndroid:1.0.11'
+
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
+    androidTestImplementation 'androidx.test.espresso:espresso-intents:3.6.1'
+    androidTestImplementation 'androidx.test.espresso:espresso-contrib:3.6.1'
+    androidTestImplementation "androidx.test.uiautomator:uiautomator:2.3.0"
+}
