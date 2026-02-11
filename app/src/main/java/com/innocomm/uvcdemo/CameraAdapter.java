@@ -25,6 +25,7 @@
 package com.innocomm.uvcdemo;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -100,13 +101,23 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
             statusBarHeight = context.getResources().getDimensionPixelSize(resourceId);
         }
         
-        // Calculate available height (subtract status bar, action bar, and padding)
+        // Calculate available height (subtract status bar, action bar/toolbar, and padding)
         int paddingDp = 4; // RecyclerView padding
         int paddingPx = (int) (paddingDp * metrics.density);
+        
+        // Use a fixed value for action bar if the identifier fails, but usually it works
+        if (actionBarHeight == 0) {
+            actionBarHeight = (int) (56 * metrics.density); // standard toolbar height
+        }
+        
         int availableHeight = screenHeight - statusBarHeight - actionBarHeight - (paddingPx * 2);
         
-        // Divide by 3 rows
-        itemHeight = availableHeight / 3;
+        // Divide by rows based on orientation
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            itemHeight = availableHeight / 2; // 2 rows in landscape (2x3)
+        } else {
+            itemHeight = availableHeight / 3; // 3 rows in portrait (3x2)
+        }
         
         if (DEBUG) Log.d(TAG, "Screen height: " + screenHeight + ", Available: " + availableHeight + ", Item height: " + itemHeight);
     }

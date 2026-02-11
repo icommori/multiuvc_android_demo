@@ -2,8 +2,24 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
-        android:id="@+id/action_refresh"
-        android:title="Refresh"
-        android:icon="@android:drawable/ic_menu_rotate"
-        app:showAsAction="ifRoom" />
+        android:id="@+id/action_temperature"
+        android:title="Temperature"
+        app:actionLayout="@layout/layout_temperature"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_more"
+        android:title="Menu"
+        android:icon="@android:drawable/ic_menu_more"
+        app:showAsAction="always">
+        <menu>
+            <item
+                android:id="@+id/action_refresh"
+                android:title="Refresh"
+                android:icon="@android:drawable/ic_menu_rotate" />
+            <item
+                android:id="@+id/action_rotate"
+                android:title="Rotate Screen"
+                android:icon="@android:drawable/ic_menu_crop" />
+        </menu>
+    </item>
 </menu>

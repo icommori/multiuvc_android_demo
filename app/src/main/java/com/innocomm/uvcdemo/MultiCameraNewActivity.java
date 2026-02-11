@@ -28,6 +28,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.RecyclerView;
 
 import android.hardware.usb.UsbDevice;
+import androidx.appcompat.widget.Toolbar;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -43,6 +44,11 @@ import com.serenegiant.usb.Format;
 import com.serenegiant.usb.Size;
 import com.serenegiant.usb.UVCCamera;
 import com.serenegiant.usb.UVCParam;
+
+import com.innocomm.perfmon.HardwareMonitor;
+import android.widget.TextView;
+import android.view.MenuItem;
+import android.view.View;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -72,16 +78,52 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
             android.Manifest.permission.CAMERA
     };
 
+    private HardwareMonitor hardwareMonitor;
+    private TextView tvTemperature;
+    private final Runnable temperatureUpdater = new Runnable() {
+        @Override
+        public void run() {
+            if (hardwareMonitor != null && tvTemperature != null) {
+                double temp = hardwareMonitor.getCpuTemperature(MultiCameraNewActivity.this);
+                if (temp > -1.0) { // HardwareMonitor returns -1.0 if not available
+                    tvTemperature.setText(String.format("%.1f°C", temp));
+                    tvTemperature.setVisibility(View.VISIBLE);
+                } else {
+                    tvTemperature.setVisibility(View.GONE);
+                }
+            }
+            mMainHandler.postDelayed(this, 2000);
+        }
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_multi_camera_new);
+        
+        Toolbar toolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
         setTitle(R.string.entry_multi_camera_new);
+
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        }
+
+        // Hide Status Bar and Navigation Bar (Immersive Sticky)
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
 
         mMainHandler = new Handler(getMainLooper());
         mHandlerThread = new HandlerThread(TAG);
         mHandlerThread.start();
         mAsyncHandler = new Handler(mHandlerThread.getLooper());
+
+        hardwareMonitor = new HardwareMonitor();
 
         if (checkAndRequestPermissions()) {
             initViews();
@@ -89,15 +131,51 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
     }
 
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        }
+    }
+
+    @Override
     public boolean onCreateOptionsMenu(android.view.Menu menu) {
         getMenuInflater().inflate(R.menu.multi_camera_menu, menu);
+        MenuItem tempItem = menu.findItem(R.id.action_temperature);
+        if (tempItem != null) {
+            View actionView = tempItem.getActionView();
+            if (actionView != null) {
+                tvTemperature = actionView.findViewById(R.id.tvTemperature);
+                // Start the updater once we have the view
+                mMainHandler.removeCallbacks(temperatureUpdater);
+                mMainHandler.post(temperatureUpdater);
+            }
+        }
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(android.view.MenuItem item) {
+        if (item.getItemId() == android.R.id.home) {
+            finish();
+            return true;
+        }
         if (item.getItemId() == R.id.action_refresh) {
             discoverAndInitCameras();
+            return true;
+        } else if (item.getItemId() == R.id.action_rotate) {
+            int currentOrientation = getResources().getConfiguration().orientation;
+            if (currentOrientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+                setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            } else {
+                setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+            }
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -145,13 +223,12 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         // monitoringHelper removed
         mHandlerThread.quitSafely();
         mAsyncHandler.removeCallbacksAndMessages(null);
+        mMainHandler.removeCallbacks(temperatureUpdater);
     }
 
     private void initViews() {
         rvCameraList = findViewById(R.id.rvCameraList);
-        
-        // Determine span count based on orientation
-        // Portrait: 2 columns, Landscape: 3 columns
+
         int orientation = getResources().getConfiguration().orientation;
         int spanCount = (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ? 3 : 2;
         

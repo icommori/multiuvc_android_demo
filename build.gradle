@@ -1,5 +1,8 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 buildscript {
+    ext {
+        kotlin_version = '2.2.0'
+    }
     repositories {
         maven { url 'https://maven.aliyun.com/repository/google' }
         maven { url 'https://maven.aliyun.com/repository/central' }
@@ -9,7 +12,8 @@ buildscript {
         gradlePluginPortal()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.5.1'
+        classpath 'com.android.tools.build:gradle:8.13.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
 
@@ -26,15 +30,11 @@ allprojects {
     }
 }
 
-task clean(type: Delete) {
-    delete rootProject.buildDir
-}
-
 ext {
-    versionCompiler = 34
-    versionTarget = 34
-    versionMin = 21
+    versionCompiler = 36
+    versionTarget = 36
+    versionMin = 24
 
-    javaSourceCompatibility = JavaVersion.VERSION_1_8
-    javaTargetCompatibility = JavaVersion.VERSION_1_8
+    javaSourceCompatibility = JavaVersion.VERSION_17
+    javaTargetCompatibility = JavaVersion.VERSION_17
 }

@@ -4,14 +4,20 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:layout_margin="2dp"
-    app:cardCornerRadius="8dp"
     app:cardBackgroundColor="@android:color/black"
+    app:cardCornerRadius="8dp"
     app:cardElevation="2dp">
 
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:padding="4dp">
+
+        <com.serenegiant.widget.AspectRatioSurfaceView
+            android:id="@+id/svCameraView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_centerInParent="true" />
 
         <ImageButton
             android:id="@+id/btnOptions"
@@ -23,25 +29,27 @@
             android:layout_marginEnd="4dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Options"
-            android:src="@android:drawable/ic_menu_more"
             android:padding="4dp"
-            android:scaleType="fitCenter" />
+            android:scaleType="fitCenter"
+            android:src="@android:drawable/ic_menu_more" />
 
         <TextView
             android:id="@+id/tvCameraName"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_alignParentTop="true"
             android:layout_alignParentStart="true"
-            android:layout_toStartOf="@id/btnOptions"
+            android:layout_alignParentTop="true"
             android:layout_marginStart="4dp"
             android:layout_marginTop="4dp"
+            android:layout_marginEnd="40dp"
+            android:background="#80000000"
+            android:padding="4dp"
+            android:text="Camera Name"
             android:textColor="@android:color/white"
             android:textSize="12sp"
             android:textStyle="bold"
-            android:background="#80000000"
-            android:padding="4dp"
-            android:text="Camera Name" />
+            android:maxLines="1"
+            android:ellipsize="end" />
 
         <TextView
             android:id="@+id/tvFps"
@@ -50,29 +58,24 @@
             android:layout_below="@id/tvCameraName"
             android:layout_alignStart="@id/tvCameraName"
             android:layout_marginTop="2dp"
-            android:textColor="@android:color/holo_green_light"
-            android:textSize="12sp"
-            android:textStyle="bold"
             android:background="#80000000"
             android:padding="2dp"
             android:text="FPS: 0"
+            android:textColor="@android:color/holo_green_light"
+            android:textSize="12sp"
+            android:textStyle="bold"
             android:visibility="gone" />
 
-        <com.serenegiant.widget.AspectRatioSurfaceView
-            android:id="@+id/svCameraView"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_centerInParent="true" />
 
         <ImageView
             android:id="@+id/ivRetry"
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:layout_centerInParent="true"
-            android:src="@android:drawable/ic_popup_sync"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:visibility="gone"
-            android:contentDescription="Retry" />
+            android:contentDescription="Retry"
+            android:src="@android:drawable/ic_popup_sync"
+            android:visibility="gone" />
 
         <ProgressBar
             android:id="@+id/pbLoading"
