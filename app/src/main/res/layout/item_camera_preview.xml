@@ -19,6 +19,12 @@
             android:layout_height="match_parent"
             android:layout_centerInParent="true" />
 
+        <com.innocomm.uvcdemo.OverlayView
+            android:id="@+id/overlayView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_centerInParent="true" />
+
         <ImageButton
             android:id="@+id/btnOptions"
             android:layout_width="32dp"

@@ -24,31 +24,30 @@
 
 package com.innocomm.uvcdemo;
 
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.recyclerview.widget.RecyclerView;
-
+import android.content.BroadcastReceiver;
 import android.hardware.usb.UsbDevice;
-import androidx.appcompat.widget.Toolbar;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
-import android.content.BroadcastReceiver;
+import android.view.MenuItem;
+import android.view.View;
+import android.widget.ImageView;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
 import androidx.recyclerview.widget.ItemTouchHelper;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.herohan.uvcapp.CameraHelper;
 import com.herohan.uvcapp.ICameraHelper;
+import com.innocomm.perfmon.HardwareMonitor;
 import com.serenegiant.usb.Format;
 import com.serenegiant.usb.Size;
 import com.serenegiant.usb.UVCCamera;
 import com.serenegiant.usb.UVCParam;
-
-import com.innocomm.perfmon.HardwareMonitor;
-import android.widget.TextView;
-import android.view.MenuItem;
-import android.view.View;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -124,10 +123,8 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         mAsyncHandler = new Handler(mHandlerThread.getLooper());
 
         hardwareMonitor = new HardwareMonitor();
+        initViews();
 
-        if (checkAndRequestPermissions()) {
-            initViews();
-        }
     }
 
     @Override
@@ -141,6 +138,21 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
                             | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                             | View.SYSTEM_UI_FLAG_FULLSCREEN
                             | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        
+        int spanCount = (newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ? 3 : 2;
+        RecyclerView.LayoutManager lm = rvCameraList.getLayoutManager();
+        if (lm instanceof androidx.recyclerview.widget.GridLayoutManager) {
+            ((androidx.recyclerview.widget.GridLayoutManager) lm).setSpanCount(spanCount);
+        }
+        
+        if (cameraAdapter != null) {
+            cameraAdapter.refreshConfig();
         }
     }
 
@@ -177,8 +189,85 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
                 setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
             }
             return true;
+        } else if (item.getItemId() == R.id.action_ai_demo) {
+            runAIDemo();
+            return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+    
+    private void runAIDemo() {
+        if (cameraAdapter == null || cameraAdapter.getItemCount() == 0) {
+            android.widget.Toast.makeText(this, "No cameras available", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        Log.d(TAG, "Starting AI Demo...");
+        
+        List<CameraItem> allItems = cameraAdapter.getCameraItems();
+        List<CameraItem> candidates = new ArrayList<>();
+        Set<com.innocomm.uvcdemo.ai.AIManager.AIType> busyTypes = new HashSet<>();
+
+        // Phase 1: Identify busy types and eligible cameras
+        for (CameraItem item : allItems) {
+            com.innocomm.uvcdemo.ai.AIManager.AIType current = item.getCurrentAIType();
+            com.innocomm.uvcdemo.ai.AIManager.AIType pending = item.getPendingAIType();
+            
+            if (current != com.innocomm.uvcdemo.ai.AIManager.AIType.NONE) {
+                busyTypes.add(current);
+            }
+            if (pending != com.innocomm.uvcdemo.ai.AIManager.AIType.NONE) {
+                busyTypes.add(pending);
+            }
+            
+            // Only cameras that are connected and have NO AI (and no pending AI)
+            if (item.isConnected() && current == com.innocomm.uvcdemo.ai.AIManager.AIType.NONE && pending == com.innocomm.uvcdemo.ai.AIManager.AIType.NONE) {
+                candidates.add(item);
+            }
+        }
+        
+        Log.d(TAG, "Found " + candidates.size() + " eligible cameras and " + busyTypes.size() + " busy AI types");
+
+        if (candidates.isEmpty()) {
+            android.widget.Toast.makeText(this, "No idle running cameras found", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Phase 2: Identify truly available types
+        List<com.innocomm.uvcdemo.ai.AIManager.AIType> freeTypes = new ArrayList<>();
+        for (com.innocomm.uvcdemo.ai.AIManager.AIType type : com.innocomm.uvcdemo.ai.AIManager.AIType.values()) {
+            if (type == com.innocomm.uvcdemo.ai.AIManager.AIType.NONE) continue;
+            if (!busyTypes.contains(type)) {
+                freeTypes.add(type);
+            }
+        }
+        
+        if (freeTypes.isEmpty()) {
+            android.widget.Toast.makeText(this, "All AI models are busy", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Phase 3: Assignment
+        int assignedCount = 0;
+        java.util.Collections.shuffle(freeTypes);
+        
+        for (CameraItem target : candidates) {
+            if (freeTypes.isEmpty()) break;
+            
+            com.innocomm.uvcdemo.ai.AIManager.AIType typeToAssign = freeTypes.remove(0);
+            int position = allItems.indexOf(target);
+            
+            if (position >= 0) {
+                Log.d(TAG, "Assigning " + typeToAssign + " to " + target.getDisplayName() + " at pos " + position);
+                cameraAdapter.assignRandomAI(position, typeToAssign);
+                assignedCount++;
+            }
+        }
+        
+        Log.d(TAG, "Successfully assigned " + assignedCount + " AI detectors");
+        if (assignedCount > 0) {
+            android.widget.Toast.makeText(this, "Started " + assignedCount + " AI detectors", android.widget.Toast.LENGTH_SHORT).show();
+        }
     }
 
     private boolean checkAndRequestPermissions() {
@@ -207,6 +296,7 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
                 }
             }
             if (allGranted) {
+                Log.v(TAG,"onRequestPermissionsResult() allGranted");
                 initViews();
                 discoverAndInitCameras();
             } else {
@@ -226,7 +316,11 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         mMainHandler.removeCallbacks(temperatureUpdater);
     }
 
+    boolean initViewsDone = false;
     private void initViews() {
+        if(initViewsDone) return;
+        initViewsDone = true;
+        Log.v(TAG,"initViews()");
         rvCameraList = findViewById(R.id.rvCameraList);
 
         int orientation = getResources().getConfiguration().orientation;
@@ -238,6 +332,8 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         
         cameraAdapter = new CameraAdapter(this);
         rvCameraList.setAdapter(cameraAdapter);
+        ImageView qr = findViewById(R.id.ivQrCode);
+        qr.setImageBitmap(QrCodeGenerator.INSTANCE.generate("https://www.innocomm.com/", 640));
         
         setupItemTouchHelper();
     }
@@ -344,6 +440,7 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
     }
 
     private void discoverAndInitCameras() {
+        Log.v(TAG,"discoverAndInitCameras()");
         mMainHandler.post(() -> {
             // Create a temporary helper to discover devices
             ICameraHelper tempHelper = new CameraHelper();
@@ -380,13 +477,13 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
                 List<CameraItem> newItems = new ArrayList<>();
 
                 for (UsbDevice device : devices) {
-                    if (processNewDevice(device, false)) {
-                         // Already added
+                    CameraItem item = processNewDevice(device, false);
+                    if (item != null) {
+                        cameraAdapter.addCameraItem(item);
                     }
                 }
                 
                 if (!cameraItems.isEmpty()) {
-                    cameraAdapter.setCameraItems(cameraItems);
                     // Start opening cameras sequentially
                     openCameraSequentially(0);
                 }
@@ -419,12 +516,13 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
 
     private void handleDeviceAttach(UsbDevice device) {
         mMainHandler.post(() -> {
-            if (processNewDevice(device, true)) {
-                cameraAdapter.setCameraItems(cameraItems);
+            CameraItem newItem = processNewDevice(device, true);
+            if (newItem != null) {
+                cameraAdapter.addCameraItem(newItem);
                 // Open new camera
                 int position = cameraItems.size() - 1;
-                CameraItem item = cameraItems.get(position);
-                openCamera(item, position, null);
+                // Since we just added it, it's at the end of both lists
+                openCamera(newItem, position, null);
             }
         });
     }
@@ -458,32 +556,32 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
                 }
                 if (keyToRemove != null) cameraItemMap.remove(keyToRemove);
                 
-                cameraAdapter.setCameraItems(cameraItems);
+                cameraAdapter.removeCameraItem(itemToRemove);
             }
         });
     }
 
-    private boolean processNewDevice(UsbDevice device, boolean isUpdate) {
+    private CameraItem processNewDevice(UsbDevice device, boolean isUpdate) {
         try {
             // Filter non-camera devices if discovered via BroadcastReceiver
-            if (isUpdate && !isUvcCamera(device)) return false;
+            if (isUpdate && !isUvcCamera(device)) return null;
 
             String deviceKey = getDeviceKey(device);
             String displayName = getDeviceDisplayName(device);
             
             // Skip Wireless_Device
-            if ("Wireless_Device".equals(displayName)) return false;
+            if ("Wireless_Device".equals(displayName)) return null;
             
             // Check duplicates
-            if (cameraItemMap.containsKey(deviceKey)) return false;
+            if (cameraItemMap.containsKey(deviceKey)) return null;
 
             CameraItem item = new CameraItem(device, displayName);
             cameraItems.add(item);
             cameraItemMap.put(deviceKey, item);
-            return true;
+            return item;
         } catch (Exception e) {
             if (DEBUG) Log.e(TAG, "Error processing device: " + e.getMessage(), e);
-            return false;
+            return null;
         }
     }
 
@@ -743,7 +841,7 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
             String deviceKey = getDeviceKey(item.getDevice());
             cameraItemMap.remove(deviceKey);
             
-            cameraAdapter.setCameraItems(cameraItems);
+            cameraAdapter.removeCameraItem(item);
         }
     }
 
@@ -758,5 +856,8 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         }
         cameraItems.clear();
         cameraItemMap.clear();
+        if (cameraAdapter != null) {
+            cameraAdapter.clearCameraItems();
+        }
     }
 }

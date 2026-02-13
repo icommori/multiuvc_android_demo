@@ -20,6 +20,7 @@
         <activity
             android:name="com.innocomm.uvcdemo.MultiCameraNewActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
             android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

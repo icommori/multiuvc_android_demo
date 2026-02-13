@@ -20,6 +20,9 @@
                 android:id="@+id/action_rotate"
                 android:title="Rotate Screen"
                 android:icon="@android:drawable/ic_menu_crop" />
+            <item
+                android:id="@+id/action_ai_demo"
+                android:title="AI Demo" />
         </menu>
     </item>
 </menu>

@@ -17,8 +17,8 @@ android {
         applicationId "com.innocomm.uvcdemo"
         minSdkVersion rootProject.ext.versionMin
         targetSdkVersion rootProject.ext.versionTarget
-        versionCode 2
-        versionName "1.0.0"
+        versionCode 3
+        versionName "1.0.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -72,11 +72,34 @@ dependencies {
 //    implementation 'com.github.warkiz.widget:indicatorseekbar:2.1.2'
     implementation 'com.github.warkiz:IndicatorSeekBar:v2.1.1'
 
-    // debugImplementation because LeakCanary should only run in debug builds.
-//    debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.8.1'
-
+    // ZXing
+    implementation 'com.google.zxing:core:3.5.3'
     implementation 'com.herohan:UVCAndroid:1.0.11'
     implementation 'androidx.core:core-ktx:1.17.0'
+
+    // ----------------------------------------------------------------------------------
+    // TensorFlow Lite 函式庫
+    // ----------------------------------------------------------------------------------
+    implementation 'org.tensorflow:tensorflow-lite:2.16.1'
+    implementation 'org.tensorflow:tensorflow-lite-task-vision:0.4.4'
+    implementation 'org.tensorflow:tensorflow-lite-gpu-delegate-plugin:0.4.4'
+    implementation 'org.tensorflow:tensorflow-lite-gpu:2.16.1'
+    implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
+
+    // ML Kit Face Detection
+    implementation 'com.google.mlkit:face-detection:16.1.7'
+
+    // ML Kit Pose Detection
+    implementation 'com.google.mlkit:pose-detection:18.0.0-beta5'
+
+    // ML Kit Face Mesh Detection
+    implementation 'com.google.mlkit:face-mesh-detection:16.0.0-beta3'
+
+    // ML Kit Barcode Scanning
+    implementation 'com.google.mlkit:barcode-scanning:17.3.0'
+
+    // ML Kit Text Recognition
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
 
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'

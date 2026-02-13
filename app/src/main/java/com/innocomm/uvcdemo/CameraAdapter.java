@@ -26,6 +26,9 @@ package com.innocomm.uvcdemo;
 
 import android.content.Context;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -43,18 +46,27 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.herohan.uvcapp.ICameraHelper;
+import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.face.Face;
+import com.google.mlkit.vision.facemesh.FaceMesh;
+import com.google.mlkit.vision.pose.Pose;
+import com.google.mlkit.vision.text.Text;
+import com.innocomm.uvcdemo.ai.AIDetector;
+import com.innocomm.uvcdemo.ai.AIManager;
+import com.innocomm.uvcdemo.ai.AgeGenderResult;
 import com.serenegiant.usb.Format;
-import com.serenegiant.usb.Size;
-import com.serenegiant.widget.AspectRatioSurfaceView;
 import com.serenegiant.usb.IFrameCallback;
+import com.serenegiant.usb.Size;
 import com.serenegiant.usb.UVCCamera;
-import java.nio.ByteBuffer;
-import java.util.concurrent.atomic.AtomicInteger;
+import com.serenegiant.widget.AspectRatioSurfaceView;
 
+import org.tensorflow.lite.task.vision.detector.Detection;
+
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraViewHolder> {
     
@@ -69,6 +81,18 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
     public interface OnCameraActionListener {
         void onRetryCamera(CameraItem item);
         void onCloseCamera(CameraItem item);
+    }
+    
+    public void assignRandomAI(int position, AIManager.AIType type) {
+        if (position >= 0 && position < cameraItems.size()) {
+            // Find ViewHolder for this position? No, we update the data and notify
+            // But we actually need to trigger the logic in ViewHolder which owns the handler
+            // So we'll use notifyItemChanged with payload
+            
+            CameraItem item = cameraItems.get(position);
+            item.setPendingAIType(type);
+            notifyItemChanged(position, "START_AI");
+        }
     }
     
     public CameraAdapter(OnCameraActionListener listener) {
@@ -121,12 +145,35 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
         
         if (DEBUG) Log.d(TAG, "Screen height: " + screenHeight + ", Available: " + availableHeight + ", Item height: " + itemHeight);
     }
-    
-    public void setCameraItems(List<CameraItem> items) {
-        this.cameraItems = items;
+
+    public void refreshConfig() {
+        calculateItemHeight();
         notifyDataSetChanged();
     }
     
+    public void addCameraItem(CameraItem item) {
+        this.cameraItems.add(item);
+        notifyItemInserted(cameraItems.size() - 1);
+    }
+
+    public void removeCameraItem(CameraItem item) {
+        int position = cameraItems.indexOf(item);
+        if (position >= 0) {
+            cameraItems.remove(position);
+            notifyItemRemoved(position);
+        }
+    }
+
+    public List<CameraItem> getCameraItems() {
+        return cameraItems;
+    }
+
+    public void clearCameraItems() {
+        int size = cameraItems.size();
+        cameraItems.clear();
+        notifyItemRangeRemoved(0, size);
+    }
+
     public void updateCameraItem(int position) {
         if (position >= 0 && position < cameraItems.size()) {
             notifyItemChanged(position);
@@ -148,9 +195,21 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
     }
     
     @Override
+    public void onBindViewHolder(@NonNull CameraViewHolder holder, int position, @NonNull List<Object> payloads) {
+        if (!payloads.isEmpty()) {
+            for (Object payload : payloads) {
+                if ("START_AI".equals(payload)) {
+                    holder.triggerPendingAI();
+                }
+            }
+        } else {
+            holder.bind(cameraItems.get(position), position);
+        }
+    }
+    
+    @Override
     public void onBindViewHolder(@NonNull CameraViewHolder holder, int position) {
-        CameraItem item = cameraItems.get(position);
-        holder.bind(item, position);
+        holder.bind(cameraItems.get(position), position);
     }
     
     @Override
@@ -164,9 +223,12 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
         holder.cleanup();
     }
     
+
+
     class CameraViewHolder extends RecyclerView.ViewHolder implements SurfaceHolder.Callback {
         
         private AspectRatioSurfaceView svCameraView;
+        private OverlayView overlayView; // Restored
         private TextView tvCameraName;
         private TextView tvFps;
         private ImageView ivRetry;
@@ -174,7 +236,12 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
         private ImageButton btnOptions;
         private CameraItem currentItem;
         
-        // FPS calculation variables
+        // AI Threading
+        private HandlerThread aiThread;
+        private Handler aiHandler;
+        private final AtomicBoolean isProcessing = new AtomicBoolean(false);
+
+        // FPS calculation
         private final AtomicInteger frameCount = new AtomicInteger(0);
         private long lastFpsUpdateTime = 0;
         private double smoothedFps = -1;
@@ -188,7 +255,6 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                         long elapsed = now - lastFpsUpdateTime;
                         if (elapsed > 0) {
                             double currentFps = (count * 1000.0) / elapsed;
-                            // Smoothing (EMA)
                             if (smoothedFps < 0) {
                                 smoothedFps = currentFps;
                             } else {
@@ -207,14 +273,118 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
 
         private final IFrameCallback frameCallback = new IFrameCallback() {
             @Override
-            public void onFrame(ByteBuffer frame) {
+            public void onFrame(ByteBuffer byteBuffer) {
+
                 frameCount.incrementAndGet();
+                if (byteBuffer != null && currentItem != null && currentItem.getCameraHelper() != null) {
+                    // Check if AI needed
+                    if (currentItem.getCurrentAIType() == AIManager.AIType.NONE) return;
+
+                    // Flow control
+                    if (isProcessing.get()) return;
+
+                    Size previewSize = currentItem.getCameraHelper().getPreviewSize();
+                    if (previewSize == null) return;
+
+                    int width = previewSize.width;
+                    int height = previewSize.height;
+                    
+                    // Mark as processing
+                    isProcessing.set(true);
+                    
+                    try {
+                        byteBuffer.rewind();
+                        // Convert to Bitmap (this copies data, so it's safe to use in another thread)
+                        // Note: yuvToBitmap is in Kotlin file com.innocomm.uvcdemo.UtilsKt
+                        final Bitmap bitmap = UtilsKt.yuvToBitmap(byteBuffer, width, height);
+                        //Log.v("innocomm","onFrame "+bitmap.getWidth()+"x"+bitmap.getHeight());
+
+                        if (bitmap != null) {
+                            if (aiHandler != null) {
+                                aiHandler.post(() -> runAIDetection(bitmap, width, height));
+                            } else {
+                                bitmap.recycle();
+                                isProcessing.set(false);
+                            }
+                        } else {
+                            isProcessing.set(false);
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Frame conversion error", e);
+                        isProcessing.set(false);
+                    }
+                }
             }
         };
+        
+        private void runAIDetection(Bitmap bitmap, int width, int height) {
+            if (currentItem == null || !currentItem.isConnected()) {
+                bitmap.recycle();
+                isProcessing.set(false);
+                return;
+            }
+
+            AIDetector detector = currentItem.getCurrentDetector();
+            if (detector == null) {
+                bitmap.recycle();
+                isProcessing.set(false);
+                return;
+            }
+
+            try {
+                // Perform detection
+                detector.detect(bitmap, result -> {
+                    // Update UI on main thread
+                    if (overlayView != null) {
+                        overlayView.post(() -> {
+                            if (result == null) {
+                                overlayView.clear();
+                            } else {
+                                updateOverlay(result, height, width); // height/width might need swapping depending on rotation, but usually standard
+                            }
+                        });
+                    }
+                    
+                    bitmap.recycle();
+                    isProcessing.set(false);
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Detection error", e);
+                bitmap.recycle();
+                isProcessing.set(false);
+            }
+        }
+
+        private void updateOverlay(Object result, int height, int width) {
+             if (result instanceof List) {
+                List<?> list = (List<?>) result;
+                if (!list.isEmpty()) {
+                    Object first = list.get(0);
+                    if (first instanceof Detection) {
+                        overlayView.setResults((List<Detection>) result, height, width);
+                    } else if (first instanceof Face) {
+                        overlayView.setFaceResults((List<Face>) result, height, width);
+                    } else if (first instanceof FaceMesh) {
+                        overlayView.setMeshResults((List<FaceMesh>) result, height, width);
+                    } else if (first instanceof Barcode) {
+                        overlayView.setBarcodeResults((List<Barcode>) result, height, width);
+                    } else if (first instanceof AgeGenderResult) {
+                        overlayView.setAgeGenderResults((List<AgeGenderResult>) result, height, width);
+                    }
+                } else {
+                    overlayView.clear();
+                }
+            } else if (result instanceof Pose) {
+                overlayView.setPoseResults((Pose) result, height, width);
+            } else if (result instanceof Text) {
+                overlayView.setTextResults((Text) result, height, width);
+            }
+        }
         
         public CameraViewHolder(@NonNull View itemView) {
             super(itemView);
             svCameraView = itemView.findViewById(R.id.svCameraView);
+            overlayView = itemView.findViewById(R.id.overlayView); // Restored
             tvCameraName = itemView.findViewById(R.id.tvCameraName);
             tvFps = itemView.findViewById(R.id.tvFps);
             ivRetry = itemView.findViewById(R.id.ivRetry);
@@ -226,10 +396,19 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
         }
         
         public void bind(CameraItem item, int position) {
-            // Remove surface and callback from old helper if exists
-            if (currentItem != null && currentItem.getCameraHelper() != null) {
+            boolean sameItem = (currentItem == item);
+
+            // Remove surface and callback from old helper if exists and it is a DIFFERENT item
+            if (currentItem != null && currentItem.getCameraHelper() != null && !sameItem) {
                 currentItem.getCameraHelper().removeSurface(svCameraView.getHolder().getSurface());
                 currentItem.getCameraHelper().setFrameCallback(null, 0);
+            }
+            
+            // Update item height
+            ViewGroup.LayoutParams params = itemView.getLayoutParams();
+            if (params.height != itemHeight) {
+                params.height = itemHeight;
+                itemView.setLayoutParams(params);
             }
             
             // Stop FPS updates and reset stats
@@ -241,6 +420,41 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
             currentItem = item;
             updateTitle(item);
             
+            // Start AI Thread if needed
+            startAIThread();
+            
+            // Restore AI Detector if persistent state exists but detector was released (e.g. during recycle)
+            if (item.getCurrentAIType() != AIManager.AIType.NONE && item.getCurrentDetector() == null) {
+                 if (aiHandler != null) {
+                     aiHandler.post(() -> {
+                         // Double check validity inside thread
+                         if (currentItem == item && item.getCurrentAIType() != AIManager.AIType.NONE && item.getCurrentDetector() == null) {
+                             if (DEBUG) Log.d(TAG, "Restoring AI detector for recycled view: " + item.getDisplayName());
+                             AIDetector detector = AIManager.getInstance(context).getDetector(item.getCurrentAIType(), item.getDeviceKey());
+                             if (detector != null) {
+                                item.setCurrentDetector(detector);
+                                // Update title to reflect ready state
+                                if (tvCameraName != null) {
+                                    tvCameraName.post(() -> updateTitle(item));
+                                }
+                             }
+                         }
+                     });
+                 }
+            }
+            
+            // Check pending AI
+            if (item.getPendingAIType() != AIManager.AIType.NONE) {
+                triggerPendingAI();
+            }
+            
+            // Reset Overlay
+            overlayView.clear();
+            
+            // ... (rest of bind) ...
+            
+            // ... (rest of bind) ...
+
             if (item.isFailed()) {
                 ivRetry.setVisibility(View.VISIBLE);
                 pbLoading.setVisibility(View.GONE);
@@ -258,16 +472,26 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                 
                 setupOptionsButton(item);
                 
+                // Update aspect ratio from helper if available
+                if (item.getCameraHelper() != null) {
+                    Size size = item.getCameraHelper().getPreviewSize();
+                    if (size != null) {
+                        svCameraView.setAspectRatio(size.width, size.height);
+                    }
+                }
+                
                 // Start FPS updates
                 tvFps.setVisibility(View.VISIBLE);
                 tvFps.post(fpsUpdater);
                 
                 // If surface is already created (view reused), add it to the new helper
-                if (svCameraView.getHolder().getSurface() != null && svCameraView.getHolder().getSurface().isValid()) {
+                // ONLY if it is a different item. If it is the same item, we assume the surface connection is still valid
+                // or managed by surfaceCreated/Destroyed callbacks.
+                if (!sameItem && svCameraView.getHolder().getSurface() != null && svCameraView.getHolder().getSurface().isValid()) {
                      if (item.getCameraHelper() != null && !item.isPaused()) {
                         item.getCameraHelper().addSurface(svCameraView.getHolder().getSurface(), false);
-                        // Add frame callback
-                        item.getCameraHelper().setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_RAW);
+                        // Add frame callback - Consolidate format to YUYV
+                        item.getCameraHelper().setFrameCallback(frameCallback, UVCCamera.FRAME_FORMAT_YUYV);
                         svCameraView.post(() -> updateTitle(item));
                      }
                 }
@@ -279,6 +503,25 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                 tvFps.setVisibility(View.GONE);
             }
         }
+        
+        private void startAIThread() {
+             if (aiThread == null) {
+                 aiThread = new HandlerThread("AIThread-" + this.hashCode());
+                 aiThread.start();
+                 aiHandler = new Handler(aiThread.getLooper());
+             }
+        }
+
+        private void stopAIThread() {
+             if (aiThread != null) {
+                 aiThread.quitSafely();
+                 try {
+                     aiThread.join(500);
+                 } catch (InterruptedException e) {}
+                 aiThread = null;
+                 aiHandler = null;
+             }
+        }
 
         @Override
         public void surfaceCreated(@NonNull SurfaceHolder holder) {
@@ -287,7 +530,7 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
             if (currentItem.getCameraHelper() != null && currentItem.isConnected() && !currentItem.isPaused()) {
                 currentItem.getCameraHelper().addSurface(holder.getSurface(), false);
                 // Add frame callback
-                currentItem.getCameraHelper().setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_RAW);
+                currentItem.getCameraHelper().setFrameCallback(frameCallback, UVCCamera.FRAME_FORMAT_YUYV);
                 svCameraView.post(() -> updateTitle(currentItem));
             }
         }
@@ -305,24 +548,12 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
             }
             if (tvFps != null) tvFps.removeCallbacks(fpsUpdater);
         }
-
-        private void updateTitle(CameraItem item) {
-            if (item == null) return;
-            String title = item.getDisplayName();
-            if (item.isConnected() && item.getCameraHelper() != null) {
-                // Check if preview size is available from helper
-                Size size = item.getCameraHelper().getPreviewSize();
-                if (size != null) {
-                    title += " - " + size.width + "x" + size.height;
-                }
-            }
-            tvCameraName.setText(title);
-        }
-
+        
         private void setupOptionsButton(CameraItem item) {
             btnOptions.setOnClickListener(v -> {
                 PopupMenu popup = new PopupMenu(context, btnOptions);
                 popup.getMenu().add(0, 1, 0, "Change Resolution");
+                popup.getMenu().add(0, 4, 0, "AI Detect (" + (item.getCurrentAIType() == AIManager.AIType.NONE ? "Off" : item.getCurrentAIType().getDisplayName()) + ") >");
                 popup.getMenu().add(0, 2, 0, "Restart Camera");
                 popup.getMenu().add(0, 3, 0, "Close");
                 
@@ -330,6 +561,9 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                     switch (menuItem.getItemId()) {
                         case 1:
                             showResolutionDialog(item);
+                            return true;
+                        case 4:
+                            showAIMenu(item);
                             return true;
                         case 2:
                             if (listener != null) {
@@ -347,121 +581,239 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                 popup.show();
             });
         }
-        
+
         private void showResolutionDialog(CameraItem item) {
-            ICameraHelper helper = item.getCameraHelper();
-            if (helper == null) return;
-            
-            List<Format> supportedFormats = helper.getSupportedFormatList();
-            if (supportedFormats == null || supportedFormats.isEmpty()) return;
-            
-            // Extract unique sizes from formats
-            List<Size> supportedSizes = new ArrayList<>();
-            for (Format format : supportedFormats) {
-                // Determine format type
-                if (format.type == 4 || format.type == 6) { // MJPEG or YUY2 usually
-                     for (Format.Descriptor descriptor : format.frameDescriptors) {
-                        List<Integer> fpsList = new ArrayList<>();
-                        if (descriptor.intervals != null) {
-                            for (Format.Interval interval : descriptor.intervals) {
-                                fpsList.add(interval.fps);
-                            }
-                        }
-                        int fps = fpsList.isEmpty() ? 0 : fpsList.get(0);
-                        Size size = new Size(descriptor.type, descriptor.width, descriptor.height, fps, fpsList);
-                         
-                         boolean exists = false;
-                         for (Size s : supportedSizes) {
-                             if (s.width == size.width && s.height == size.height) {
-                                 exists = true;
-                                 break;
-                             }
-                         }
-                         if (!exists) supportedSizes.add(size);
-                     }
-                }
+            if (item == null || item.getCameraHelper() == null) return;
+            List<Format> formats = item.getCameraHelper().getSupportedFormatList();
+            if (formats == null || formats.isEmpty()) {
+                Toast.makeText(context, "No formats available", Toast.LENGTH_SHORT).show();
+                return;
             }
-            
-            if (supportedSizes.isEmpty()) {
-                 // Fallback if type check failed
-                 for (Format format : supportedFormats) {
+
+            List<String> sizeStrings = new ArrayList<>();
+            List<Size> sizes = new ArrayList<>();
+
+            for (Format format : formats) {
+                if (format.type == UVCCamera.UVC_VS_FORMAT_MJPEG) {
                     for (Format.Descriptor descriptor : format.frameDescriptors) {
-                        List<Integer> fpsList = new ArrayList<>();
-                        if (descriptor.intervals != null) {
-                            for (Format.Interval interval : descriptor.intervals) {
-                                fpsList.add(interval.fps);
-                            }
-                        }
-                        int fps = fpsList.isEmpty() ? 0 : fpsList.get(0);
-                        Size size = new Size(descriptor.type, descriptor.width, descriptor.height, fps, fpsList);
-
                          boolean exists = false;
-                         for (Size s : supportedSizes) {
-                             if (s.width == size.width && s.height == size.height) {
+                         for (Size s : sizes) {
+                             if (s.width == descriptor.width && s.height == descriptor.height) {
                                  exists = true;
                                  break;
                              }
                          }
-                         if (!exists) supportedSizes.add(size);
+                         if (!exists) {
+                             sizes.add(new Size(descriptor.type, descriptor.width, descriptor.height, 30, new ArrayList<>()));
+                             sizeStrings.add(descriptor.width + "x" + descriptor.height);
+                         }
                     }
-                 }
-            }
-
-            // Sort sizes
-            Collections.sort(supportedSizes, (o1, o2) -> {
-                int area1 = o1.width * o1.height;
-                int area2 = o2.width * o2.height;
-                return Integer.compare(area2, area1); // Descending
-            });
-
-            PopupMenu sizePopup = new PopupMenu(context, btnOptions);
-            for (int i = 0; i < supportedSizes.size(); i++) {
-                Size size = supportedSizes.get(i);
-                sizePopup.getMenu().add(1, i, i, size.width + "x" + size.height);
+                }
             }
             
-            sizePopup.setOnMenuItemClickListener(menuItem -> {
-                int index = menuItem.getItemId();
-                if (index >= 0 && index < supportedSizes.size()) {
-                    Size selectedSize = supportedSizes.get(index);
-                    changeResolution(item, selectedSize);
-                    return true;
-                }
-                return false;
-            });
-            sizePopup.show();
-        }
-        
-        private void changeResolution(CameraItem item, Size size) {
-            ICameraHelper helper = item.getCameraHelper();
-            if (helper != null) {
-                if (!item.isPaused()) {
-                    helper.stopPreview();
-                }
-                helper.setPreviewSize(size);
-                svCameraView.setAspectRatio(size.width, size.height);
-                if (!item.isPaused()) {
-                    helper.startPreview();
-                    // Re-add frame callback after restart? usually needed
-                    helper.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_RAW);
-                }
-                updateTitle(item);
-                Toast.makeText(context, "Resolution changed to " + size.width + "x" + size.height, Toast.LENGTH_SHORT).show();
+            if (sizes.isEmpty()) {
+                 Toast.makeText(context, "No MJPEG formats", Toast.LENGTH_SHORT).show();
+                 return;
             }
+
+            new androidx.appcompat.app.AlertDialog.Builder(context)
+                .setTitle("Select Resolution")
+                .setItems(sizeStrings.toArray(new String[0]), (dialog, which) -> {
+                    Size selected = sizes.get(which);
+                    if (DEBUG) Log.d(TAG, "Selected resolution: " + selected.width + "x" + selected.height);
+                    
+                    if (item.getCameraHelper() != null) {
+                        item.getCameraHelper().stopPreview();
+                        item.getCameraHelper().setPreviewSize(selected);
+                        item.getCameraHelper().startPreview();
+                        
+                        // Update aspect ratio of SurfaceView
+                        if (svCameraView != null) {
+                            svCameraView.setAspectRatio(selected.width, selected.height);
+                        }
+                        
+                        // Re-register frame callback with the new resolution
+                        item.getCameraHelper().setFrameCallback(frameCallback, UVCCamera.FRAME_FORMAT_YUYV);
+                        
+                        // Update title IMMEDIATELY using the selected resolution to avoid delay/stale values
+                        updateTitle(item, selected.width, selected.height);
+                        
+                        // Still post a sync update later just in case library state takes time to settle
+                        tvCameraName.postDelayed(() -> updateTitle(item), 1000);
+                    }
+                })
+                .show();
         }
         
+        private void showAIMenu(CameraItem item) {
+            PopupMenu aiPopup = new PopupMenu(context, btnOptions);
+            AIManager aiManager = AIManager.getInstance(context);
+            String userId = item.getDeviceKey();
 
-        
+            // None option
+            aiPopup.getMenu().add(1, 0, 0, "None");
+
+            // AI Options
+            AIManager.AIType[] types = AIManager.AIType.values();
+            for (int i = 1; i < types.length; i++) {
+                AIManager.AIType type = types[i];
+                boolean isBusy = aiManager.isAIBusy(type, userId);
+                String title = type.getDisplayName() + (isBusy ? " (In Use)" : "");
+                aiPopup.getMenu().add(1, i, i, title).setEnabled(!isBusy);
+            }
+
+            aiPopup.setOnMenuItemClickListener(menuItem -> {
+                int index = menuItem.getItemId();
+                if (index < 0 || index >= AIManager.AIType.values().length) return false;
+                
+                AIManager.AIType selectedType = AIManager.AIType.values()[index];
+                if (DEBUG) Log.d(TAG, "AI Mode selected: " + selectedType);
+                
+                if (selectedType == item.getCurrentAIType()) return true;
+
+                // Perform switch on AI thread to avoid race with detection
+                if (aiHandler != null) {
+                    // Show a toast or loading indicator if needed?
+                    
+                    aiHandler.post(() -> {
+                         // Stop previous AI
+                        if (item.getCurrentAIType() != AIManager.AIType.NONE) {
+                            if (DEBUG) Log.d(TAG, "Releasing previous AI: " + item.getCurrentAIType());
+                            aiManager.releaseDetector(item.getCurrentAIType(), userId);
+                            item.setCurrentAIType(AIManager.AIType.NONE);
+                            item.setCurrentDetector(null);
+                            if (overlayView != null) overlayView.post(() -> overlayView.clear());
+                            
+                            // Force reset processing flag to prevent stuck state
+                            isProcessing.set(false);
+                        }
+
+                        // Start new AI
+                        if (selectedType != AIManager.AIType.NONE) {
+                            if (DEBUG) Log.d(TAG, "Getting new detector for: " + selectedType);
+                            // Force reset processing flag before starting new AI
+                            isProcessing.set(false);
+                            
+                            AIDetector detector = aiManager.getDetector(selectedType, userId);
+                            if (detector != null) {
+                                item.setCurrentAIType(selectedType);
+                                item.setCurrentDetector(detector);
+                            } else {
+                                if (context != null) {
+                                    new Handler(context.getMainLooper()).post(() -> 
+                                        Toast.makeText(context, "AI is currently in use by another camera", Toast.LENGTH_SHORT).show()
+                                    );
+                                }
+                            }
+                        }
+                        
+                        // Update UI
+                        if (tvCameraName != null) {
+                            tvCameraName.post(() -> updateTitle(item));
+                        }
+                    });
+                }
+                
+                return true;
+            });
+            aiPopup.show();
+        }
+
+        private void updateTitle(CameraItem item) {
+            updateTitle(item, -1, -1);
+        }
+
+        private void updateTitle(CameraItem item, int manualWidth, int manualHeight) {
+            if (item == null || tvCameraName == null) return;
+            
+            String displayName = item.getDisplayName();
+            final StringBuilder titleBuilder = new StringBuilder(displayName);
+            
+            if (manualWidth > 0 && manualHeight > 0) {
+                // Use manually provided resolution
+                titleBuilder.append(" - ").append(manualWidth).append("x").append(manualHeight);
+            } else if (item.isConnected() && item.getCameraHelper() != null) {
+                Size size = item.getCameraHelper().getPreviewSize();
+                if (size != null) {
+                    titleBuilder.append(" - ").append(size.width).append("x").append(size.height);
+                }
+            }
+            
+            if (item.getCurrentAIType() != AIManager.AIType.NONE) {
+                 titleBuilder.append(" [").append(item.getCurrentAIType().getDisplayName()).append("]");
+            }
+            
+            final String finalTitle = titleBuilder.toString();
+            tvCameraName.post(() -> tvCameraName.setText(finalTitle));
+        }
+
         public void cleanup() {
             if (DEBUG) Log.d(TAG, "cleanup ViewHolder");
+
             // Remove surface from helper if exists
             if (currentItem != null && currentItem.getCameraHelper() != null) {
                 currentItem.getCameraHelper().removeSurface(svCameraView.getHolder().getSurface());
-                // Remove frame callback 
-                // currentItem.getCameraHelper().setFrameCallback(null, 0);
             }
-            if (tvFps != null) tvFps.removeCallbacks(fpsUpdater);
             currentItem = null;
         }
+
+        public void cleanupAIjob() {
+            if (DEBUG) Log.d(TAG, "onDetached()");
+            isProcessing.set(true); // Stop processing
+
+            // Release AI resources (but KEEP persistent state for recycle)
+            if (currentItem != null && currentItem.getCurrentAIType() != AIManager.AIType.NONE) {
+                if (DEBUG) Log.d(TAG, "Releasing detector for view recycle: " + currentItem.getDisplayName());
+                AIManager.getInstance(context).releaseDetector(currentItem.getCurrentAIType(), currentItem.getDeviceKey());
+                // Do NOT reset AIType here so it can be restored in bind()
+                currentItem.setCurrentDetector(null);
+            }
+            if (currentItem != null && currentItem.getCameraHelper() != null) {
+                currentItem.getCameraHelper().setFrameCallback(null, 0);
+            }
+
+            if (tvFps != null) tvFps.removeCallbacks(fpsUpdater);
+
+            stopAIThread();
+        }
+        public void triggerPendingAI() {
+            if (currentItem != null && currentItem.getPendingAIType() != AIManager.AIType.NONE) {
+                AIManager.AIType pendingType = currentItem.getPendingAIType();
+                // Consume
+                currentItem.setPendingAIType(AIManager.AIType.NONE);
+                
+                if (aiHandler != null) {
+                    aiHandler.post(() -> {
+                        // Release previous if any
+                        if (currentItem.getCurrentAIType() != AIManager.AIType.NONE) {
+                             if (DEBUG) Log.d(TAG, "Releasing previous AI for pending: " + currentItem.getCurrentAIType());
+                             AIManager.getInstance(context).releaseDetector(currentItem.getCurrentAIType(), currentItem.getDeviceKey());
+                             currentItem.setCurrentAIType(AIManager.AIType.NONE);
+                             currentItem.setCurrentDetector(null);
+                             isProcessing.set(false);
+                             if (overlayView != null) overlayView.post(() -> overlayView.clear());
+                        }
+                        
+                         // Force reset processing flag
+                        isProcessing.set(false);
+
+                        if (DEBUG) Log.d(TAG, "Starting pending AI: " + pendingType);
+                        AIDetector detector = AIManager.getInstance(context).getDetector(pendingType, currentItem.getDeviceKey());
+                        if (detector != null) {
+                            currentItem.setCurrentAIType(pendingType);
+                            currentItem.setCurrentDetector(detector);
+                        } else {
+                            if (DEBUG) Log.w(TAG, "Could not get detector for pending AI: " + pendingType);
+                        }
+                        
+                         // Update UI
+                        if (tvCameraName != null) {
+                            tvCameraName.post(() -> updateTitle(currentItem));
+                        }
+                    });
+                }
+            }
+        }
+
     }
 }

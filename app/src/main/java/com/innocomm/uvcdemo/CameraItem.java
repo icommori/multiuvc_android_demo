@@ -98,4 +98,33 @@ public class CameraItem {
         if (device == null) return "";
         return device.getVendorId() + "_" + device.getProductId() + "_" + device.getDeviceName();
     }
+
+    private com.innocomm.uvcdemo.ai.AIManager.AIType currentAIType = com.innocomm.uvcdemo.ai.AIManager.AIType.NONE;
+    private com.innocomm.uvcdemo.ai.AIDetector currentDetector;
+
+    public com.innocomm.uvcdemo.ai.AIManager.AIType getCurrentAIType() {
+        return currentAIType;
+    }
+
+    public void setCurrentAIType(com.innocomm.uvcdemo.ai.AIManager.AIType type) {
+        this.currentAIType = type;
+    }
+
+    public com.innocomm.uvcdemo.ai.AIDetector getCurrentDetector() {
+        return currentDetector;
+    }
+
+    public void setCurrentDetector(com.innocomm.uvcdemo.ai.AIDetector detector) {
+        this.currentDetector = detector;
+    }
+    
+    private com.innocomm.uvcdemo.ai.AIManager.AIType pendingAIType = com.innocomm.uvcdemo.ai.AIManager.AIType.NONE;
+
+    public void setPendingAIType(com.innocomm.uvcdemo.ai.AIManager.AIType type) {
+        this.pendingAIType = type;
+    }
+
+    public com.innocomm.uvcdemo.ai.AIManager.AIType getPendingAIType() {
+        return pendingAIType;
+    }
 }
