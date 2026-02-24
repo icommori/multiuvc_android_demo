@@ -17,6 +17,11 @@ A high-performance Android application demonstrating simultaneous previewing of 
 - **High Performance**: Optimized for multi-camera setups using MJPEG format and smart bandwidth management (targeting 15 FPS per camera).
 - **Smooth FPS Display**: Real-time FPS counter with EMA (Exponential Moving Average) smoothing for stable readings.
 
+### Display & Output
+- **HDMI Projection**: Project any camera stream directly to an external display via HDMI.
+- **Dynamic Overlay Routing**: AI detection overlays are automatically routed to the active presentation screen during projection.
+- **Smart Toggle UI**: The HDMI toggle button appears only when a secondary display is connected, making display management seamless.
+
 ### AI Detection
 - **Comprehensive AI Suite**: Built-in support for:
     - **Object Detection**: Generic object detection using TensorFlow Lite.
@@ -53,6 +58,7 @@ A high-performance Android application demonstrating simultaneous previewing of 
     - Select specific **AI Detect** modes.
     - Change **Resolution**.
     - Restart or Close the stream.
+- **HDMI Projection**: Connect an external display and click the **HDMI toggle icon** on the top right of a camera view to project it instantly. Click it again to revert to normal view.
 - **Reorder**: Long-press any preview to drag it to a new position in the grid.
 
 ## Architecture

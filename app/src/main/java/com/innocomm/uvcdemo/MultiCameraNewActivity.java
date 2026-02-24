@@ -25,11 +25,13 @@
 package com.innocomm.uvcdemo;
 
 import android.content.BroadcastReceiver;
+import android.hardware.display.DisplayManager;
 import android.hardware.usb.UsbDevice;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
+import android.view.Display;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.ImageView;
@@ -56,7 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class MultiCameraNewActivity extends AppCompatActivity implements CameraAdapter.OnCameraActionListener {
+public class MultiCameraNewActivity extends AppCompatActivity implements CameraAdapter.OnCameraActionListener, DisplayManager.DisplayListener {
 
     private static final boolean DEBUG = true;
     private static final String TAG = MultiCameraNewActivity.class.getSimpleName();
@@ -71,6 +73,9 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
     private HandlerThread mHandlerThread;
     private Handler mAsyncHandler;
     private Handler mMainHandler;
+
+    private DisplayManager displayManager;
+    private Display externalDisplay;
 
     private static final int REQUEST_PERMISSION_CODE = 123;
     private static final String[] REQUIRED_PERMISSIONS = {
@@ -102,7 +107,7 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
-        setTitle(R.string.entry_multi_camera_new);
+        setTitle(R.string.app_name);
 
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
@@ -121,6 +126,9 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         mHandlerThread = new HandlerThread(TAG);
         mHandlerThread.start();
         mAsyncHandler = new Handler(mHandlerThread.getLooper());
+
+        displayManager = (DisplayManager) getSystemService(android.content.Context.DISPLAY_SERVICE);
+        displayManager.registerDisplayListener(this, mMainHandler);
 
         hardwareMonitor = new HardwareMonitor();
         initViews();
@@ -314,6 +322,9 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         mHandlerThread.quitSafely();
         mAsyncHandler.removeCallbacksAndMessages(null);
         mMainHandler.removeCallbacks(temperatureUpdater);
+        if (displayManager != null) {
+            displayManager.unregisterDisplayListener(this);
+        }
     }
 
     boolean initViewsDone = false;
@@ -332,6 +343,7 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         
         cameraAdapter = new CameraAdapter(this);
         rvCameraList.setAdapter(cameraAdapter);
+        checkExternalDisplay();
         ImageView qr = findViewById(R.id.ivQrCode);
         qr.setImageBitmap(QrCodeGenerator.INSTANCE.generate("https://www.innocomm.com/", 640));
         
@@ -833,6 +845,12 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
             item.setCameraHelper(null);
         }
         
+        if (item.isProjecting() && item.getDisplayPresentation() != null) {
+            item.getDisplayPresentation().dismiss();
+            item.setDisplayPresentation(null);
+            item.setProjecting(false);
+        }
+        
         // Remove from list and map
         int position = cameraItems.indexOf(item);
         if (position >= 0) {
@@ -852,6 +870,11 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
                 item.getCameraHelper().release();
                 item.setCameraHelper(null);
             }
+            if (item.isProjecting() && item.getDisplayPresentation() != null) {
+                item.getDisplayPresentation().dismiss();
+                item.setDisplayPresentation(null);
+                item.setProjecting(false);
+            }
             item.setConnected(false);
         }
         cameraItems.clear();
@@ -859,5 +882,35 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         if (cameraAdapter != null) {
             cameraAdapter.clearCameraItems();
         }
+    }
+
+    private void checkExternalDisplay() {
+        if (displayManager == null) return;
+        Display[] displays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
+        if (displays.length > 0) {
+            externalDisplay = displays[0];
+            if (DEBUG) Log.d(TAG, "External display connected: " + externalDisplay.getName());
+        } else {
+            externalDisplay = null;
+            if (DEBUG) Log.d(TAG, "External display disconnected.");
+        }
+        if (cameraAdapter != null) {
+            cameraAdapter.setExternalDisplay(externalDisplay);
+        }
+    }
+
+    @Override
+    public void onDisplayAdded(int displayId) {
+        checkExternalDisplay();
+    }
+
+    @Override
+    public void onDisplayRemoved(int displayId) {
+        checkExternalDisplay();
+    }
+
+    @Override
+    public void onDisplayChanged(int displayId) {
+        checkExternalDisplay();
     }
 }

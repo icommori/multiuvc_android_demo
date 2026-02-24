@@ -102,6 +102,12 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
             calculateItemHeight();
         }
     }
+
+    private android.view.Display externalDisplay = null;
+    public void setExternalDisplay(android.view.Display display) {
+        this.externalDisplay = display;
+        notifyDataSetChanged();
+    }
     
     private void calculateItemHeight() {
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
@@ -234,6 +240,8 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
         private ImageView ivRetry;
         private ProgressBar pbLoading;
         private ImageButton btnOptions;
+        private ImageButton btnHdmiToggle;
+        private ImageView ivProjecting;
         private CameraItem currentItem;
         
         // AI Threading
@@ -338,7 +346,10 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                     if (overlayView != null) {
                         overlayView.post(() -> {
                             if (result == null) {
-                                overlayView.clear();
+                                if (overlayView != null) overlayView.clear();
+                                if (currentItem != null && currentItem.getDisplayPresentation() != null) {
+                                    currentItem.getDisplayPresentation().getOverlayView().clear();
+                                }
                             } else {
                                 updateOverlay(result, height, width); // height/width might need swapping depending on rotation, but usually standard
                             }
@@ -356,28 +367,33 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
         }
 
         private void updateOverlay(Object result, int height, int width) {
+             OverlayView targetOverlayView = (currentItem != null && currentItem.isProjecting() && currentItem.getDisplayPresentation() != null) 
+                 ? currentItem.getDisplayPresentation().getOverlayView() : this.overlayView;
+                 
+             if (targetOverlayView == null) return;
+             
              if (result instanceof List) {
                 List<?> list = (List<?>) result;
                 if (!list.isEmpty()) {
                     Object first = list.get(0);
                     if (first instanceof Detection) {
-                        overlayView.setResults((List<Detection>) result, height, width);
+                        targetOverlayView.setResults((List<Detection>) result, height, width);
                     } else if (first instanceof Face) {
-                        overlayView.setFaceResults((List<Face>) result, height, width);
+                        targetOverlayView.setFaceResults((List<Face>) result, height, width);
                     } else if (first instanceof FaceMesh) {
-                        overlayView.setMeshResults((List<FaceMesh>) result, height, width);
+                        targetOverlayView.setMeshResults((List<FaceMesh>) result, height, width);
                     } else if (first instanceof Barcode) {
-                        overlayView.setBarcodeResults((List<Barcode>) result, height, width);
+                        targetOverlayView.setBarcodeResults((List<Barcode>) result, height, width);
                     } else if (first instanceof AgeGenderResult) {
-                        overlayView.setAgeGenderResults((List<AgeGenderResult>) result, height, width);
+                        targetOverlayView.setAgeGenderResults((List<AgeGenderResult>) result, height, width);
                     }
                 } else {
-                    overlayView.clear();
+                    targetOverlayView.clear();
                 }
             } else if (result instanceof Pose) {
-                overlayView.setPoseResults((Pose) result, height, width);
+                targetOverlayView.setPoseResults((Pose) result, height, width);
             } else if (result instanceof Text) {
-                overlayView.setTextResults((Text) result, height, width);
+                targetOverlayView.setTextResults((Text) result, height, width);
             }
         }
         
@@ -390,6 +406,8 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
             ivRetry = itemView.findViewById(R.id.ivRetry);
             pbLoading = itemView.findViewById(R.id.pbLoading);
             btnOptions = itemView.findViewById(R.id.btnOptions);
+            btnHdmiToggle = itemView.findViewById(R.id.btnHdmiToggle);
+            ivProjecting = itemView.findViewById(R.id.ivProjecting);
             
             svCameraView.setAspectRatio(640, 480);
             svCameraView.getHolder().addCallback(this);
@@ -449,7 +467,10 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
             }
             
             // Reset Overlay
-            overlayView.clear();
+            if (overlayView != null) overlayView.clear();
+            if (item != null && item.getDisplayPresentation() != null) {
+                item.getDisplayPresentation().getOverlayView().clear();
+            }
             
             // ... (rest of bind) ...
             
@@ -471,6 +492,8 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                 btnOptions.setVisibility(View.VISIBLE);
                 
                 setupOptionsButton(item);
+                setupHdmiToggle(item);
+                updateHdmiUI(item);
                 
                 // Update aspect ratio from helper if available
                 if (item.getCameraHelper() != null) {
@@ -484,11 +507,9 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                 tvFps.setVisibility(View.VISIBLE);
                 tvFps.post(fpsUpdater);
                 
-                // If surface is already created (view reused), add it to the new helper
-                // ONLY if it is a different item. If it is the same item, we assume the surface connection is still valid
-                // or managed by surfaceCreated/Destroyed callbacks.
-                if (!sameItem && svCameraView.getHolder().getSurface() != null && svCameraView.getHolder().getSurface().isValid()) {
-                     if (item.getCameraHelper() != null && !item.isPaused()) {
+                if (svCameraView.getHolder().getSurface() != null && svCameraView.getHolder().getSurface().isValid()) {
+                     if (item.getCameraHelper() != null && !item.isPaused() && !item.isProjecting()) {
+                        item.getCameraHelper().removeSurface(svCameraView.getHolder().getSurface());
                         item.getCameraHelper().addSurface(svCameraView.getHolder().getSurface(), false);
                         // Add frame callback - Consolidate format to YUYV
                         item.getCameraHelper().setFrameCallback(frameCallback, UVCCamera.FRAME_FORMAT_YUYV);
@@ -527,7 +548,7 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
         public void surfaceCreated(@NonNull SurfaceHolder holder) {
             if (currentItem == null) return;
             if (DEBUG) Log.d(TAG, "surfaceCreated for " + currentItem.getDisplayName());
-            if (currentItem.getCameraHelper() != null && currentItem.isConnected() && !currentItem.isPaused()) {
+            if (currentItem.getCameraHelper() != null && currentItem.isConnected() && !currentItem.isPaused() && !currentItem.isProjecting()) {
                 currentItem.getCameraHelper().addSurface(holder.getSurface(), false);
                 // Add frame callback
                 currentItem.getCameraHelper().setFrameCallback(frameCallback, UVCCamera.FRAME_FORMAT_YUYV);
@@ -580,6 +601,105 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                 });
                 popup.show();
             });
+        }
+
+        
+        private void setupHdmiToggle(CameraItem item) {
+            if (externalDisplay != null) {
+                btnHdmiToggle.setVisibility(View.VISIBLE);
+                btnHdmiToggle.setOnClickListener(v -> {
+                    if (item.isProjecting()) {
+                        stopProjection(item);
+                    } else {
+                        startProjection(item);
+                    }
+                    notifyDataSetChanged();
+                });
+            } else {
+                btnHdmiToggle.setVisibility(View.GONE);
+                if (item.isProjecting()) {
+                    stopProjection(item);
+                }
+            }
+        }
+
+        private void startProjection(CameraItem item) {
+            if (externalDisplay == null || item.getCameraHelper() == null) return;
+            // First stop any other projecting items
+            for (CameraItem ci : cameraItems) {
+                if (ci.isProjecting() && ci != item) {
+                    ci.setProjecting(false);
+                    if (ci.getDisplayPresentation() != null) {
+                        ci.getDisplayPresentation().dismiss();
+                        ci.setDisplayPresentation(null);
+                    }
+                }
+            }
+            item.setProjecting(true);
+            HdmiPresentation presentation = new HdmiPresentation(context, externalDisplay);
+            item.setDisplayPresentation(presentation);
+            presentation.show();
+            
+            presentation.getCameraView().getHolder().addCallback(new SurfaceHolder.Callback() {
+                @Override
+                public void surfaceCreated(SurfaceHolder holder) {
+                    if (item.getCameraHelper() != null) {
+                        try {
+                            item.getCameraHelper().removeSurface(svCameraView.getHolder().getSurface());
+                        } catch(Exception e){}
+                        item.getCameraHelper().addSurface(holder.getSurface(), false);
+                        Size size = item.getCameraHelper().getPreviewSize();
+                        if (size != null) {
+                            presentation.getCameraView().setAspectRatio(size.width, size.height);
+                        }
+                    }
+                }
+                @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {}
+                @Override public void surfaceDestroyed(SurfaceHolder holder) {
+                    if (item.getCameraHelper() != null) {
+                        item.getCameraHelper().removeSurface(holder.getSurface());
+                    }
+                }
+            });
+            updateHdmiUI(item);
+        }
+
+        private void stopProjection(CameraItem item) {
+            item.setProjecting(false);
+            if (item.getDisplayPresentation() != null) {
+                if (item.getDisplayPresentation().getOverlayView() != null) {
+                     item.getDisplayPresentation().getOverlayView().clear();
+                }
+                if (item.getCameraHelper() != null && item.getDisplayPresentation().getCameraView().getHolder().getSurface() != null) {
+                    item.getCameraHelper().removeSurface(item.getDisplayPresentation().getCameraView().getHolder().getSurface());
+                }
+                item.getDisplayPresentation().dismiss();
+                item.setDisplayPresentation(null);
+            }
+            
+            // Reconnect back to original surface
+            if (item.getCameraHelper() != null && svCameraView.getHolder().getSurface() != null && svCameraView.getHolder().getSurface().isValid()) {
+                try {
+                    item.getCameraHelper().removeSurface(svCameraView.getHolder().getSurface());
+                } catch(Exception e){}
+                item.getCameraHelper().addSurface(svCameraView.getHolder().getSurface(), false);
+                item.getCameraHelper().setFrameCallback(frameCallback, UVCCamera.FRAME_FORMAT_YUYV);
+            }
+            updateHdmiUI(item);
+        }
+
+        private void updateHdmiUI(CameraItem item) {
+            if (item.isProjecting()) {
+                btnHdmiToggle.setColorFilter(android.graphics.Color.GREEN);
+                svCameraView.setVisibility(View.INVISIBLE);
+                overlayView.setVisibility(View.INVISIBLE);
+                ivProjecting.setVisibility(View.VISIBLE);
+            } else {
+                btnHdmiToggle.clearColorFilter();
+                svCameraView.setVisibility(View.VISIBLE);
+                overlayView.setVisibility(View.VISIBLE);
+                ivProjecting.setVisibility(View.GONE);
+            }
         }
 
         private void showResolutionDialog(CameraItem item) {

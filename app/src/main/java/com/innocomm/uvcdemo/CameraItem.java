@@ -127,4 +127,14 @@ public class CameraItem {
     public com.innocomm.uvcdemo.ai.AIManager.AIType getPendingAIType() {
         return pendingAIType;
     }
+
+    private boolean isProjecting = false;
+    private HdmiPresentation displayPresentation = null;
+
+    public boolean isProjecting() { return isProjecting; }
+    public void setProjecting(boolean projecting) { isProjecting = projecting; }
+    
+    public HdmiPresentation getDisplayPresentation() { return displayPresentation; }
+    public void setDisplayPresentation(HdmiPresentation p) { displayPresentation = p; }
 }
+

@@ -9,6 +9,5 @@
     <color name="white">#FFFFFFFF</color>
 
     <!-- Web colors -->
-    <color name="GRAY">#ff808080</color>
     <color name="ic_launcher_background">#FFFFFF</color>
 </resources>

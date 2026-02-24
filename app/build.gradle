@@ -17,8 +17,8 @@ android {
         applicationId "com.innocomm.uvcdemo"
         minSdkVersion rootProject.ext.versionMin
         targetSdkVersion rootProject.ext.versionTarget
-        versionCode 3
-        versionName "1.0.1"
+        versionCode 4
+        versionName "1.0.2"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
