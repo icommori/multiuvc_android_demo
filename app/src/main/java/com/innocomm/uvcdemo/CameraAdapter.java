@@ -112,7 +112,7 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
     private void calculateItemHeight() {
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         DisplayMetrics metrics = new DisplayMetrics();
-        wm.getDefaultDisplay().getMetrics(metrics);
+        wm.getDefaultDisplay().getRealMetrics(metrics);
         
         int orientation = context.getResources().getConfiguration().orientation;
         int screenHeight = metrics.heightPixels;
@@ -140,14 +140,22 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
             actionBarHeight = (int) (56 * metrics.density); // standard toolbar height
         }
         
-        int availableHeight = screenHeight - statusBarHeight - actionBarHeight - (paddingPx * 2);
+        int availableHeight = screenHeight - actionBarHeight - statusBarHeight;
         
         // Divide by rows based on orientation
-        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            itemHeight = availableHeight / 2; // 2 rows in landscape (2x3)
+        int rowCount;
+        int size = Math.max(1, cameraItems.size());
+        if (size == 1) {
+            rowCount = 1;
+        } else if (size == 2) {
+            rowCount = (orientation == Configuration.ORIENTATION_LANDSCAPE) ? 1 : 2;
+        } else if (size <= 4) {
+            rowCount = 2;
         } else {
-            itemHeight = availableHeight / 3; // 3 rows in portrait (3x2)
+            rowCount = (orientation == Configuration.ORIENTATION_LANDSCAPE) ? 2 : 3;
         }
+        
+        itemHeight = availableHeight / rowCount;
         
         if (DEBUG) Log.d(TAG, "Screen height: " + screenHeight + ", Available: " + availableHeight + ", Item height: " + itemHeight);
     }
@@ -156,17 +164,24 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
         calculateItemHeight();
         notifyDataSetChanged();
     }
-    
     public void addCameraItem(CameraItem item) {
         this.cameraItems.add(item);
-        notifyItemInserted(cameraItems.size() - 1);
+        if (context instanceof MultiCameraNewActivity) {
+            ((MultiCameraNewActivity) context).updateGridLayout();
+        } else {
+            refreshConfig();
+        }
     }
 
     public void removeCameraItem(CameraItem item) {
         int position = cameraItems.indexOf(item);
         if (position >= 0) {
             cameraItems.remove(position);
-            notifyItemRemoved(position);
+            if (context instanceof MultiCameraNewActivity) {
+                ((MultiCameraNewActivity) context).updateGridLayout();
+            } else {
+                refreshConfig();
+            }
         }
     }
 
@@ -175,9 +190,12 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
     }
 
     public void clearCameraItems() {
-        int size = cameraItems.size();
         cameraItems.clear();
-        notifyItemRangeRemoved(0, size);
+        if (context instanceof MultiCameraNewActivity) {
+            ((MultiCameraNewActivity) context).updateGridLayout();
+        } else {
+            refreshConfig();
+        }
     }
 
     public void updateCameraItem(int position) {
@@ -248,6 +266,7 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
         private HandlerThread aiThread;
         private Handler aiHandler;
         private final AtomicBoolean isProcessing = new AtomicBoolean(false);
+        private long lastAiFrameTime = 0;
 
         // FPS calculation
         private final AtomicInteger frameCount = new AtomicInteger(0);
@@ -288,6 +307,10 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                     // Check if AI needed
                     if (currentItem.getCurrentAIType() == AIManager.AIType.NONE) return;
 
+                    // Frame skipping: limited to approx 15fps
+                    long now = System.currentTimeMillis();
+                    if (now - lastAiFrameTime < 66) return; 
+
                     // Flow control
                     if (isProcessing.get()) return;
 
@@ -299,6 +322,7 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                     
                     // Mark as processing
                     isProcessing.set(true);
+                    lastAiFrameTime = now;
                     
                     try {
                         byteBuffer.rewind();
@@ -750,6 +774,10 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                         // Update aspect ratio of SurfaceView
                         if (svCameraView != null) {
                             svCameraView.setAspectRatio(selected.width, selected.height);
+                        }
+                        
+                        if (item.isProjecting() && item.getDisplayPresentation() != null) {
+                            item.getDisplayPresentation().getCameraView().setAspectRatio(selected.width, selected.height);
                         }
                         
                         // Re-register frame callback with the new resolution

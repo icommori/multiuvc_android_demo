@@ -16,6 +16,7 @@ public class MyFaceDetector implements AIDetector {
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
                 .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
                 .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+                .setMinFaceSize(0.15f)
                 .build();
         detector = FaceDetection.getClient(options);
     }

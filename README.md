@@ -11,7 +11,8 @@ A high-performance Android application demonstrating simultaneous previewing of 
 
 ### Camera Management
 - **Multi-Camera Support**: Preview up to 6+ UVC cameras simultaneously (bandwidth permitting).
-- **Sequential Initialization**: Robust sequential opening process to prevent USB permission conflicts and bandwidth spikes.
+- **Sequential Initialization**: Staggered camera opening process (1000ms delay) to prevent USB bus congestion and power spikes.
+- **Zero-Leak Lifecycle**: Robust resource management with a failsafe process-kill mechanism on exit. This ensures 100% release of USB handles, eliminating the "This device is occupied" error even after hardware-level camera hangs.
 - **Dynamic Reordering**: Long-press and drag camera previews to customize your grid layout.
 - **USB Hot-plug**: Real-time detection and automatic initialization of newly connected UVC devices.
 - **High Performance**: Optimized for multi-camera setups using MJPEG format and smart bandwidth management (targeting 15 FPS per camera).
@@ -30,7 +31,7 @@ A high-performance Android application demonstrating simultaneous previewing of 
     - **Pose Detection**: Real-time body pose estimation.
     - **Barcode/QR Code**: High-speed scanning for all barcode formats.
     - **Text Recognition**: Supporting Chinese/English text recognition.
-    - **Age & Gender Estimation**: Simultaneous age and gender prediction with tracking-based optimization.
+    - **Age & Gender Estimation**: Simultaneous age and gender prediction with custom coordinate-based tracking and 10-second periodic re-inference for maximum performance.
 - **Per-Camera AI Engine**: Each camera can run a different AI model independently on its own background thread.
 - **Resource Efficiency**: Heavy AI models are automatically released when views are recycled and restored when they come back into view.
 - **AI Demo Mode**: One-click to randomly assign available AI models to all non-AI active cameras.
@@ -61,11 +62,19 @@ A high-performance Android application demonstrating simultaneous previewing of 
 - **HDMI Projection**: Connect an external display and click the **HDMI toggle icon** on the top right of a camera view to project it instantly. Click it again to revert to normal view.
 - **Reorder**: Long-press any preview to drag it to a new position in the grid.
 
+## Tips & Troubleshooting
+
+### "This device is occupied" Error
+If you encounter this message after a camera crash (e.g., trying to set an unsupported 4K resolution):
+1. **Restart the App**: Press the back button to exit or kill the app from the task switcher. The built-in resource cleanup will force the USB bus to reset.
+2. **Re-plug**: Physically disconnect and reconnect the USB camera.
+3. **Bandwidth**: Use a powered USB 3.0 hub when connecting more than 2 cameras to avoid power-related connection hangs.
+
 ## Architecture
 
 - **`MultiCameraNewActivity`**: The main activity managing the lifecycle of multiple `CameraHelper` instances and global AI demo logic.
 - **`CameraAdapter`**: RecyclerView adapter that manages the display of UVC previews, background AI threads, and overlay rendering.
-- **`AIManager`**: Singleton manager for shared AI detector instances and resource exclusivity.
+- **`AIManager`**: Singleton manager for shared AI detector instances with global resource cleanup capabilities to prevent memory leaks and handle collisions.
 - **`OverlayView`**: Custom view for high-performance canvas-based rendering of AI results.
 
 ## Third-Party Libraries & Licenses

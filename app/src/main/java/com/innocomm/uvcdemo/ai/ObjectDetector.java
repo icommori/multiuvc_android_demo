@@ -4,10 +4,9 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.util.Log;
 
-import org.tensorflow.lite.gpu.CompatibilityList;
+import org.tensorflow.lite.support.image.TensorImage;
 import org.tensorflow.lite.task.core.BaseOptions;
 import org.tensorflow.lite.task.vision.detector.ObjectDetector.ObjectDetectorOptions;
-import org.tensorflow.lite.support.image.TensorImage;
 
 import java.io.IOException;
 
@@ -23,14 +22,31 @@ public class ObjectDetector implements AIDetector {
     @Override
     public void init() {
         try {
-            BaseOptions.Builder baseOptionsBuilder = BaseOptions.builder().setNumThreads(4);
-            if (new CompatibilityList().isDelegateSupportedOnThisDevice()) {
-                baseOptionsBuilder.useGpu();
+            int availableProcessors = Runtime.getRuntime().availableProcessors();
+            int numThreads;
+            if (availableProcessors <= 2) {
+                numThreads = 2;
+            } else if (availableProcessors <= 4) {
+                numThreads = 4;
+            } else {
+                numThreads = 4; // Optimal performance/power ratio
+            }
+            
+            Log.v(TAG, "availableProcessors " + availableProcessors + ", numThreads " + numThreads);
+
+            BaseOptions.Builder baseOptionsBuilder = BaseOptions.builder().setNumThreads(numThreads);
+            
+            // Use NNAPI as requested
+            try {
+                baseOptionsBuilder.useNnapi();
+                Log.i(TAG, "Delegating to NNAPI");
+            } catch (Exception e) {
+                Log.w(TAG, "NNAPI not available, fallback to CPU: " + e.getMessage());
             }
 
             ObjectDetectorOptions options = ObjectDetectorOptions.builder()
                     .setScoreThreshold(0.5f)
-                    .setMaxResults(10)
+                    .setMaxResults(50)
                     .setBaseOptions(baseOptionsBuilder.build())
                     .build();
 
@@ -38,6 +54,8 @@ public class ObjectDetector implements AIDetector {
                     context, "efficientdet-lite0.tflite", options);
         } catch (IOException e) {
             Log.e(TAG, "Failed to load model", e);
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "TFLite failed to load model with error: " + e.getMessage());
         }
     }
 

@@ -54,13 +54,17 @@ public class AgeGenderDetector implements AIDetector {
     public void init() {
         FaceDetectorOptions faceOptions = new FaceDetectorOptions.Builder()
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-                .enableTracking()
+                .setMinFaceSize(0.15f)
                 .build();
         faceDetector = FaceDetection.getClient(faceOptions);
 
         try {
+            int availableProcessors = Runtime.getRuntime().availableProcessors();
+            int numThreads = (availableProcessors <= 2) ? 2 : 4;
+            Log.v(TAG, "availableProcessors " + availableProcessors + ", numThreads " + numThreads);
+
             Interpreter.Options tfliteOptions = new Interpreter.Options();
-            tfliteOptions.setNumThreads(4);
+            tfliteOptions.setNumThreads(numThreads);
 
             ByteBuffer ageModel = FileUtil.loadMappedFile(context, "model_age_nonq.tflite");
             ByteBuffer genderModel = FileUtil.loadMappedFile(context, "model_gender_nonq.tflite");
@@ -102,49 +106,74 @@ public class AgeGenderDetector implements AIDetector {
                 });
     }
 
+    private int nextPseudoId = 0;
+    private final Map<Integer, Long> lastSeenMap = new HashMap<>();
+
     private List<AgeGenderResult> processFaces(List<Face> faces, Bitmap fullBitmap) {
         if (DEBUG_LOG) Log.v(TAG, "Processing " + faces.size() + " faces");
         List<AgeGenderResult> currentResults = new ArrayList<>();
-        List<Integer> currentIds = new ArrayList<>();
+        long now = System.currentTimeMillis();
 
         for (Face face : faces) {
-            int id = face.getTrackingId() != null ? face.getTrackingId() : -1;
             Rect rect = face.getBoundingBox();
-            currentIds.add(id);
+            int centerX = rect.centerX();
+            int centerY = rect.centerY();
+            
+            // 找出最接近的舊人臉 (手動追蹤)
+            int bestMatchId = -1;
+            double minDistance = Double.MAX_VALUE;
+            double threshold = (rect.width() + rect.height()) / 2.0 * 0.8; // 容許移動範圍
 
-            if (id != -1 && resultCache.containsKey(id)) {
-                AgeGenderResult cached = resultCache.get(id);
-                currentResults.add(new AgeGenderResult(id, rect, cached.age, cached.gender));
-            } else {
+            for (Map.Entry<Integer, AgeGenderResult> entry : resultCache.entrySet()) {
+                Rect cachedRect = entry.getValue().boundingBox;
+                int dx = centerX - cachedRect.centerX();
+                int dy = centerY - cachedRect.centerY();
+                double dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < threshold && dist < minDistance) {
+                    minDistance = dist;
+                    bestMatchId = entry.getKey();
+                }
+            }
+
+            AgeGenderResult matched = (bestMatchId != -1) ? resultCache.get(bestMatchId) : null;
+            boolean needsInference = (matched == null) || (now - matched.timestamp >= 10000);
+
+            if (needsInference) {
                 Bitmap cropped = cropBitmap(fullBitmap, rect);
                 if (cropped != null) {
                     try {
                         float ageRaw = predictAge(cropped);
                         float[] genderProbs = predictGender(cropped);
-                        
                         int age = (int) (ageRaw * 116);
                         AgeGenderResult.Gender gender = (genderProbs[0] > genderProbs[1]) ? AgeGenderResult.Gender.MALE : AgeGenderResult.Gender.FEMALE;
                         
-                        Log.d(TAG, "ID: " + id + " -> RawAge: " + ageRaw + " (Age: " + age + "), GenderProbs: [" + genderProbs[0] + ", " + genderProbs[1] + "]");
-
-                        AgeGenderResult result = new AgeGenderResult(id, rect, age, gender);
+                        int targetId = (bestMatchId != -1) ? bestMatchId : nextPseudoId++;
+                        AgeGenderResult result = new AgeGenderResult(targetId, rect, age, gender, now);
+                        
                         currentResults.add(result);
-                        if (id != -1) {
-                             resultCache.put(id, result);
-                        }
+                        resultCache.put(targetId, result);
+                        lastSeenMap.put(targetId, now);
+                        
+                        if (DEBUG_LOG) Log.d(TAG, "New inference for ID " + targetId + ": " + age + " " + gender);
                     } catch (Exception e) {
-                        Log.e(TAG, "Inference error for face", e);
+                        Log.e(TAG, "Inference error", e);
                     } finally {
                         cropped.recycle();
                     }
-                } else {
-                    Log.w(TAG, "Failed to crop face for ID: " + id);
                 }
+            } else {
+                // 套用緩存結果，但更新座標
+                AgeGenderResult updated = new AgeGenderResult(bestMatchId, rect, matched.age, matched.gender, matched.timestamp);
+                currentResults.add(updated);
+                resultCache.put(bestMatchId, updated);
+                lastSeenMap.put(bestMatchId, now);
             }
         }
 
-        // Clean cache
-        resultCache.keySet().removeIf(id -> !currentIds.contains(id));
+        // 清理超過 1 秒沒出現的人臉緩存
+        resultCache.keySet().removeIf(id -> (now - lastSeenMap.getOrDefault(id, 0L)) > 1000);
+        lastSeenMap.keySet().removeIf(id -> !resultCache.containsKey(id));
 
         return currentResults;
     }

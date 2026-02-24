@@ -152,8 +152,25 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
     @Override
     public void onConfigurationChanged(@NonNull android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        updateGridLayout();
+    }
+    
+    public void updateGridLayout() {
+        if (rvCameraList == null) return;
+        int orientation = getResources().getConfiguration().orientation;
+        int size = Math.max(1, cameraItems.size());
+        int spanCount;
         
-        int spanCount = (newConfig.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ? 3 : 2;
+        if (size == 1) {
+            spanCount = 1;
+        } else if (size == 2) {
+            spanCount = (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ? 2 : 1;
+        } else if (size <= 4) {
+            spanCount = 2;
+        } else {
+            spanCount = (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ? 3 : 2;
+        }
+
         RecyclerView.LayoutManager lm = rvCameraList.getLayoutManager();
         if (lm instanceof androidx.recyclerview.widget.GridLayoutManager) {
             ((androidx.recyclerview.widget.GridLayoutManager) lm).setSpanCount(spanCount);
@@ -325,6 +342,13 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         if (displayManager != null) {
             displayManager.unregisterDisplayListener(this);
         }
+        com.innocomm.uvcdemo.ai.AIManager.getInstance(this).resetAll();
+        
+        if (isFinishing()) {
+            // 強制殺掉 Process 確保 UVC 資源徹底釋放
+            Log.w(TAG, "Killing process to ensure UVC release");
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }
     }
 
     boolean initViewsDone = false;
@@ -335,14 +359,14 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
         rvCameraList = findViewById(R.id.rvCameraList);
 
         int orientation = getResources().getConfiguration().orientation;
-        int spanCount = (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) ? 3 : 2;
         
         androidx.recyclerview.widget.GridLayoutManager gridLayoutManager = 
-            new androidx.recyclerview.widget.GridLayoutManager(this, spanCount);
+            new androidx.recyclerview.widget.GridLayoutManager(this, 1);
         rvCameraList.setLayoutManager(gridLayoutManager);
         
         cameraAdapter = new CameraAdapter(this);
         rvCameraList.setAdapter(cameraAdapter);
+        updateGridLayout();
         checkExternalDisplay();
         ImageView qr = findViewById(R.id.ivQrCode);
         qr.setImageBitmap(QrCodeGenerator.INSTANCE.generate("https://www.innocomm.com/", 640));
@@ -556,6 +580,7 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
                 if (itemToRemove.getCameraHelper() != null) {
                     itemToRemove.getCameraHelper().release();
                 }
+                com.innocomm.uvcdemo.ai.AIManager.getInstance(this).releaseAllDetectors(itemToRemove.getDeviceKey());
                 
                 cameraItems.remove(itemToRemove);
                 // Remove from map
@@ -743,6 +768,9 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
                     item.setFailed(true);
                     item.setConnected(false);
                     mMainHandler.post(() -> cameraAdapter.updateCameraItem(position));
+                    
+                    item.setConnected(false);
+                    mMainHandler.post(() -> cameraAdapter.updateCameraItem(position));
                     completionCallback.run();
                 }
             }, 10000); // 10 second timeout
@@ -838,6 +866,7 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
     @Override
     public void onCloseCamera(CameraItem item) {
         if (DEBUG) Log.d(TAG, "Close camera: " + item.getDisplayName());
+        com.innocomm.uvcdemo.ai.AIManager.getInstance(this).releaseAllDetectors(item.getDeviceKey());
         
         // Release helper
         if (item.getCameraHelper() != null) {
@@ -865,6 +894,7 @@ public class MultiCameraNewActivity extends AppCompatActivity implements CameraA
 
     private void releaseAllCameras() {
         if (DEBUG) Log.d(TAG, "Releasing all cameras");
+        com.innocomm.uvcdemo.ai.AIManager.getInstance(this).resetAll();
         for (CameraItem item : cameraItems) {
             if (item.getCameraHelper() != null) {
                 item.getCameraHelper().release();

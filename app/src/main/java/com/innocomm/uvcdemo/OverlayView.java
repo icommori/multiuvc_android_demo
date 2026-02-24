@@ -62,6 +62,29 @@ public class OverlayView extends View {
         super(context, attrs);
         initPaints();
     }
+    
+    private void updateDynamicSizes() {
+        int w = getWidth();
+        int h = getHeight();
+        if (w == 0 || h == 0) return;
+        
+        // Base dimensions (e.g. on a 1080p screen)
+        float baseLength = 1080f;
+        float currentLength = Math.max(w, h);
+        
+        float ratio = currentLength / baseLength;
+        // Keep a minimum ratio so sizes don't get impossibly small
+        ratio = Math.max(ratio, 0.4f);
+        
+        float textSize = 30f * ratio; // Base text size 30
+        float strokeWidth = 8f * ratio; // Base stroke width 8
+
+        textBackgroundPaint.setTextSize(textSize);
+        textPaint.setTextSize(textSize);
+        boxPaint.setStrokeWidth(strokeWidth);
+        linePaint.setStrokeWidth(strokeWidth * 0.7f);
+        dotPaint.setStrokeWidth(Math.max(2f, strokeWidth * 0.4f));
+    }
 
     private void initPaints() {
         textBackgroundPaint.setColor(Color.BLACK);
@@ -93,11 +116,11 @@ public class OverlayView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        // Debug box to verify overlay is visible
-        boxPaint.setColor(Color.MAGENTA);
-        boxPaint.setStrokeWidth(10f);
-        //canvas.drawRect(20, 20, 150, 150, boxPaint);
         
+        updateDynamicSizes();
+        
+        float currentStrokeWidth = boxPaint.getStrokeWidth();
+
         Log.v("OverlayView", "onDraw currentMode=" + currentMode);
 
         switch (currentMode) {
@@ -245,7 +268,6 @@ public class OverlayView extends View {
                     (item.gender == AgeGenderResult.Gender.MALE) ? Color.BLUE : Color.GRAY;
 
             boxPaint.setColor(color);
-            boxPaint.setStrokeWidth(8f);
             canvas.drawRect(rect, boxPaint);
 
             String text = String.format("%d / %s", item.age, 

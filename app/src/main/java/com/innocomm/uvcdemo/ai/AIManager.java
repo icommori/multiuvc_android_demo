@@ -67,20 +67,40 @@ public class AIManager {
     }
 
     public synchronized void releaseDetector(AIType type, String userId) {
-        if (type == AIType.NONE) return;
-        Log.v("innocomm","releaseDetector "+type);
-        if (activeUsers.containsKey(type) && activeUsers.get(type).equals(userId)) {
+        if (type == AIType.NONE || type == null) return;
+        Log.v("innocomm","releaseDetector " + type + " for user " + userId);
+        
+        String activeUser = activeUsers.get(type);
+        if (activeUser != null && (userId == null || activeUser.equals(userId))) {
             activeUsers.remove(type);
-            // We can choose to keep the detector in memory (lazy release)
-            // or release it immediately if no one is using it.
-            // The user asked for "initialized when needed and released when not used".
-            // Since we only allow ONE user per AI, removing from activeUsers IS releasing its usage.
-            // For actual memory release:
             AIDetector detector = detectors.remove(type);
             if (detector != null) {
                 detector.release();
             }
         }
+    }
+
+    public synchronized void releaseAllDetectors(String userId) {
+        if (userId == null) return;
+        Log.v("innocomm","releaseAllDetectors for user " + userId);
+        java.util.List<AIType> toRelease = new java.util.ArrayList<>();
+        for (Map.Entry<AIType, String> entry : activeUsers.entrySet()) {
+            if (userId.equals(entry.getValue())) {
+                toRelease.add(entry.getKey());
+            }
+        }
+        for (AIType type : toRelease) {
+            releaseDetector(type, userId);
+        }
+    }
+
+    public synchronized void resetAll() {
+        Log.v("innocomm","AIManager resetAll()");
+        for (AIDetector detector : detectors.values()) {
+            if (detector != null) detector.release();
+        }
+        detectors.clear();
+        activeUsers.clear();
     }
 
     public synchronized boolean isAIBusy(AIType type, String userId) {
