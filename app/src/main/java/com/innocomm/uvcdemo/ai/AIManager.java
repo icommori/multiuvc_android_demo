@@ -3,7 +3,7 @@ package com.innocomm.uvcdemo.ai;
 import android.content.Context;
 import android.util.Log;
 
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
 public class AIManager {
@@ -27,9 +27,10 @@ public class AIManager {
     }
 
     private static AIManager instance;
-    private final Map<AIType, AIDetector> detectors = new HashMap<>();
-    private final Map<AIType, String> activeUsers = new HashMap<>(); // AIType -> CameraID/DisplayName
+    private final Map<AIType, AIDetector> detectors = new ConcurrentHashMap<>();
+    private final Map<AIType, String> activeUsers = new ConcurrentHashMap<>(); // AIType -> CameraID/DisplayName
     private Context context;
+    private final Object initLock = new Object();
 
     private AIManager(Context context) {
         this.context = context.getApplicationContext();
@@ -42,7 +43,7 @@ public class AIManager {
         return instance;
     }
 
-    public synchronized AIDetector getDetector(AIType type, String userId) {
+    public AIDetector getDetector(AIType type, String userId) {
         if (type == AIType.NONE) return null;
 
         // Check if already used by someone else
@@ -50,12 +51,15 @@ public class AIManager {
             return null; // Busy
         }
 
-        AIDetector detector = detectors.get(type);
-        if (detector == null) {
-            detector = createDetector(type);
-            if (detector != null) {
-                detector.init();
-                detectors.put(type, detector);
+        AIDetector detector;
+        synchronized (initLock) {
+            detector = detectors.get(type);
+            if (detector == null) {
+                detector = createDetector(type);
+                if (detector != null) {
+                    detector.init();
+                    detectors.put(type, detector);
+                }
             }
         }
 
@@ -66,21 +70,23 @@ public class AIManager {
         return detector;
     }
 
-    public synchronized void releaseDetector(AIType type, String userId) {
+    public void releaseDetector(AIType type, String userId) {
         if (type == AIType.NONE || type == null) return;
         Log.v("innocomm","releaseDetector " + type + " for user " + userId);
         
-        String activeUser = activeUsers.get(type);
-        if (activeUser != null && (userId == null || activeUser.equals(userId))) {
-            activeUsers.remove(type);
-            AIDetector detector = detectors.remove(type);
-            if (detector != null) {
-                detector.release();
+        synchronized (initLock) {
+            String activeUser = activeUsers.get(type);
+            if (activeUser != null && (userId == null || activeUser.equals(userId))) {
+                activeUsers.remove(type);
+                AIDetector detector = detectors.remove(type);
+                if (detector != null) {
+                    detector.release();
+                }
             }
         }
     }
 
-    public synchronized void releaseAllDetectors(String userId) {
+    public void releaseAllDetectors(String userId) {
         if (userId == null) return;
         Log.v("innocomm","releaseAllDetectors for user " + userId);
         java.util.List<AIType> toRelease = new java.util.ArrayList<>();
@@ -94,16 +100,18 @@ public class AIManager {
         }
     }
 
-    public synchronized void resetAll() {
+    public void resetAll() {
         Log.v("innocomm","AIManager resetAll()");
-        for (AIDetector detector : detectors.values()) {
-            if (detector != null) detector.release();
+        synchronized (initLock) {
+            for (AIDetector detector : detectors.values()) {
+                if (detector != null) detector.release();
+            }
+            detectors.clear();
+            activeUsers.clear();
         }
-        detectors.clear();
-        activeUsers.clear();
     }
 
-    public synchronized boolean isAIBusy(AIType type, String userId) {
+    public boolean isAIBusy(AIType type, String userId) {
         if (type == AIType.NONE) return false;
         return activeUsers.containsKey(type) && !activeUsers.get(type).equals(userId);
     }

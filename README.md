@@ -2,7 +2,6 @@
 
 <p align="center">
   <img src="img/001.png" width="45%" />
-  <img src="img/002.png" width="45%" />
 </p>
 
 A high-performance Android application demonstrating simultaneous previewing of multiple UVC (USB Video Class) cameras with real-time AI inference capabilities.
@@ -51,6 +50,15 @@ A high-performance Android application demonstrating simultaneous previewing of 
 3. Build and run on your target device.
 
 ## Usage
+
+### 🚀 Quick Start (AI Demo Flow)
+To experience the multi-camera AI inference capabilities quickly:
+1. **Plug in USB cameras** (use a powered USB hub for multiple cameras).
+2. **Wait for all previews** to finish loading sequentially.
+3. **Click "AI DEMO"** in the top right menu.
+4. **Wait for the AI models** to initialize and load one by one (a progress dialog will show during initialization).
+
+### General Controls
 
 - **Discovery**: Upon launch, the app scans for connected UVC cameras and starts them sequentially.
 - **Refresh**: Use the refresh icon in the menu to scan for newly plugged cameras.

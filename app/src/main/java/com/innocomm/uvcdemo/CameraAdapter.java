@@ -819,10 +819,14 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                 
                 if (selectedType == item.getCurrentAIType()) return true;
 
+                // Block UI globally here with a ProgressDialog
+                android.app.ProgressDialog progressDialog = new android.app.ProgressDialog(context);
+                progressDialog.setMessage("Initializing AI (" + selectedType.getDisplayName() + ")...");
+                progressDialog.setCancelable(false);
+                progressDialog.show();
+
                 // Perform switch on AI thread to avoid race with detection
                 if (aiHandler != null) {
-                    // Show a toast or loading indicator if needed?
-                    
                     aiHandler.post(() -> {
                          // Stop previous AI
                         if (item.getCurrentAIType() != AIManager.AIType.NONE) {
@@ -855,11 +859,18 @@ public class CameraAdapter extends RecyclerView.Adapter<CameraAdapter.CameraView
                             }
                         }
                         
-                        // Update UI
-                        if (tvCameraName != null) {
-                            tvCameraName.post(() -> updateTitle(item));
-                        }
+                        // Update UI and dismiss progress dialog
+                        new Handler(context.getMainLooper()).post(() -> {
+                            updateTitle(item);
+                            if (progressDialog.isShowing()) {
+                                progressDialog.dismiss();
+                            }
+                        });
                     });
+                } else {
+                    if (progressDialog.isShowing()) {
+                        progressDialog.dismiss();
+                    }
                 }
                 
                 return true;

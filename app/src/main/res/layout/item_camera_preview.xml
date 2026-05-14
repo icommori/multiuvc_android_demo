@@ -45,8 +45,8 @@
 
         <ImageButton
             android:id="@+id/btnOptions"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
             android:layout_alignParentTop="true"
             android:layout_alignParentEnd="true"
             android:layout_marginTop="4dp"
